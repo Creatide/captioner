@@ -4,6 +4,7 @@ import mimetypes
 import os
 import subprocess
 import sys
+import time
 
 import openai
 import requests
@@ -19,6 +20,7 @@ openai_api_key = os.environ.get("OPENAI_API_KEY")
 image_folder = "images"
 image_longest_side_in_px = 2000  # Max length for the longer side of the image
 upscale_small_images = True  # Upscale images smaller than the longest side
+request_per_minute = 20  # Requests per minute
 
 # Global token usage summary
 token_usage_summary = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -30,7 +32,12 @@ if not openai_api_key:
 openai.api_key = openai_api_key
 
 
-def send_image_to_openai_api(image_base64):
+def send_image_to_openai_api(image_base64, rpm=30):
+    # Calculate delay based on RPM
+    delay = 60 / rpm
+    print(f"Delay between requests: {delay} seconds.")
+    time.sleep(delay)
+
     # instructions = "Generate a descriptive caption for this image."
     instructions = (
         "Generate a concise, descriptive caption for the image, focusing on key elements and features. "
@@ -55,7 +62,7 @@ def send_image_to_openai_api(image_base64):
                 ],
             }
         ],
-        "max_tokens": 2000,
+        "max_tokens": 20000,
     }
     try:
         response = requests.post(
@@ -76,7 +83,11 @@ def send_image_to_openai_api(image_base64):
         print(f"Token usage for this request: {token_usage}")
 
     except requests.exceptions.HTTPError as e:
-        description = f"HTTP error occurred: {e}"
+        if e.response.status_code == 429:
+            print("HTTP error occurred: 429 Too Many Requests")
+            sys.exit(1)
+        else:
+            print(f"HTTP error occurred: {e}")
     except (KeyError, IndexError, TypeError):
         description = "Error: Unable to process image."
     return description
@@ -112,22 +123,39 @@ def image_to_base64(
     return image_base64
 
 
-def process_images(folder, image_longest_side_in_px, upscale_small_images=True):
-    for filename in os.listdir(folder):
-        if filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
-            file_path = os.path.join(folder, filename)
-            image_base64 = image_to_base64(
-                file_path, image_longest_side_in_px, upscale_small_images
-            )
-            description = send_image_to_openai_api(image_base64)
-            description = format_description(description)
-            base_filename = os.path.splitext(filename)[0]
-            with open(
-                os.path.join(folder, f"{base_filename}_description.txt"), "w"
-            ) as txt_file:
-                txt_file.write(description)
+def process_images(folder, image_longest_side_in_px, upscale_small_images=True, rpm=30):
+    image_files = [
+        f
+        for f in os.listdir(folder)
+        if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif"))
+    ]
+    total_images = len(image_files)
+    images_processed = 0
+
+    for filename in image_files:
+        file_path = os.path.join(folder, filename)
+        image_base64 = image_to_base64(
+            file_path, image_longest_side_in_px, upscale_small_images
+        )
+        description = send_image_to_openai_api(image_base64, rpm)
+        description = format_description(description)
+        base_filename = os.path.splitext(filename)[0]
+        with open(os.path.join(folder, f"{base_filename}.txt"), "w") as txt_file:
+            txt_file.write(description)
+
+        images_processed += 1
+        remaining_images = total_images - images_processed
+        estimated_remaining_time = (remaining_images * 60) / rpm
+        print(
+            f"Processed {images_processed}/{total_images}. Estimated remaining time: {estimated_remaining_time:.2f} seconds."
+        )
 
 
 if __name__ == "__main__":
-    process_images(image_folder, image_longest_side_in_px, upscale_small_images)
-    print(f"Token usage for this session: {token_usage_summary}")
+    process_images(
+        folder=image_folder,
+        image_longest_side_in_px=image_longest_side_in_px,
+        upscale_small_images=upscale_small_images,
+        rpm=request_per_minute,
+    )
+    print(f"Session ended. Token usage summary: {token_usage_summary}")
