@@ -21,6 +21,7 @@ image_folder = "images"
 image_longest_side_in_px = 2000  # Max length for the longer side of the image
 upscale_small_images = True  # Upscale images smaller than the longest side
 request_per_minute = 20  # Requests per minute
+max_request_retries = 5  # Maximum number of retries for failed requests
 
 # Global token usage summary
 token_usage_summary = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -32,65 +33,77 @@ if not openai_api_key:
 openai.api_key = openai_api_key
 
 
-def send_image_to_openai_api(image_base64, rpm=30):
+def send_image_to_openai_api(image_base64, rpm=30, max_retries=5):
     # Calculate delay based on RPM
     delay = 60 / rpm
-    print(f"Delay between requests: {delay} seconds.")
-    time.sleep(delay)
+    retry_count = 0
+    exponential_backoff = delay
 
-    # instructions = "Generate a descriptive caption for this image."
-    instructions = (
-        "Generate a concise, descriptive caption for the image, focusing on key elements and features. "
-        "Analyze all elements in the image, understanding both the overall composition and individual components. "
-        "Describe elements using single words or brief phrases, avoiding long sentences, and separate them with commas. "
-        "Include tags for poses, orientations, and background styles where relevant. "
-        "Refrain from using specific names of locations, brands, or individuals in your descriptions. Replace these with generic terms that broadly categorize the subject."
-        "Example: For an image with an in-vehicle infotainment system, use 'user interface, clean design, navigation, music player, in-vehicle infotainment, white style, button bar on bottom.'"
-    )
-    headers = {"Authorization": f"Bearer {openai_api_key}"}
-    payload = {
-        "model": "gpt-4-vision-preview",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": instructions},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_base64, "detail": "low"},
-                    },
-                ],
-            }
-        ],
-        "max_tokens": 20000,
-    }
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions", headers=headers, json=payload
+    while retry_count < max_retries:
+        print(
+            f"Attempt {retry_count + 1}: Delay between requests: {exponential_backoff} seconds."
         )
-        response.raise_for_status()
-        response_data = response.json()
-        description = response.json()["choices"][0]["message"]["content"]
+        time.sleep(exponential_backoff)
 
-        # Update global token usage summary
-        token_usage = response_data.get("usage", {})
-        global token_usage_summary
-        token_usage_summary["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
-        token_usage_summary["completion_tokens"] += token_usage.get(
-            "completion_tokens", 0
+        # Prompt for image caption
+        instructions = (
+            "Generate a concise, descriptive caption for the image, focusing on key elements and features. "
+            "Analyze all elements in the image, understanding both the overall composition and individual components. "
+            "Describe elements using single words or brief phrases, avoiding long sentences, and separate them with commas. "
+            "Include tags for poses, orientations, and background styles where relevant. "
+            "Refrain from using specific names of locations, brands, or individuals in your descriptions. Replace these with generic terms that broadly categorize the subject."
+            "Example: For an image with an in-vehicle infotainment system, use 'user interface, clean design, navigation, music player, in-vehicle infotainment, white style, button bar on bottom.'"
         )
-        token_usage_summary["total_tokens"] += token_usage.get("total_tokens", 0)
-        print(f"Token usage for this request: {token_usage}")
+        headers = {"Authorization": f"Bearer {openai_api_key}"}
+        payload = {
+            "model": "gpt-4-vision-preview",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": instructions},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_base64, "detail": "low"},
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": 300,
+        }
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            description = response_data["choices"][0]["message"]["content"]
 
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 429:
-            print("HTTP error occurred: 429 Too Many Requests")
-            sys.exit(1)
-        else:
+            token_usage = response_data.get("usage", {})
+            global token_usage_summary
+            token_usage_summary["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
+            token_usage_summary["completion_tokens"] += token_usage.get(
+                "completion_tokens", 0
+            )
+            token_usage_summary["total_tokens"] += token_usage.get("total_tokens", 0)
+            print(f"Token usage for this request: {token_usage}")
+
+            return description
+
+        except requests.exceptions.HTTPError as e:
             print(f"HTTP error occurred: {e}")
-    except (KeyError, IndexError, TypeError):
-        description = "Error: Unable to process image."
-    return description
+            if e.response.status_code == 429:
+                retry_count += 1
+                exponential_backoff *= 2
+                continue
+            else:
+                description = "Error: Unable to process image."
+                return description
+
+    print("Maximum retries reached. Exiting.")
+    sys.exit(1)
 
 
 def format_description(description):
@@ -123,7 +136,9 @@ def image_to_base64(
     return image_base64
 
 
-def process_images(folder, image_longest_side_in_px, upscale_small_images=True, rpm=30):
+def process_images(
+    folder, image_longest_side_in_px, upscale_small_images=True, rpm=30, max_retries=5
+):
     image_files = [
         f
         for f in os.listdir(folder)
@@ -157,5 +172,6 @@ if __name__ == "__main__":
         image_longest_side_in_px=image_longest_side_in_px,
         upscale_small_images=upscale_small_images,
         rpm=request_per_minute,
+        max_retries=max_request_retries,
     )
     print(f"Session ended. Token usage summary: {token_usage_summary}")
