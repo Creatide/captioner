@@ -19,6 +19,7 @@ openai_api_key = os.environ.get("OPENAI_API_KEY")
 # Settings for processing images
 image_folder = "images"
 image_longest_side_in_px = 2000  # Max length for the longer side of the image
+save_scaled_image = "overwrite"  # Options: 'overwrite', 'new_file', 'none'
 upscale_small_images = True  # Upscale images smaller than the longest side
 request_per_minute = 20  # Requests per minute
 max_request_retries = 5  # Maximum number of retries for failed requests
@@ -113,13 +114,17 @@ def format_description(description):
 
 
 def image_to_base64(
-    image_path="images", image_longest_side_in_px=None, upscale_small_images=True
+    image_path,
+    image_longest_side_in_px=None,
+    upscale_small_images=True,
+    save_scaled_image="none",
 ):
     mime_type, _ = mimetypes.guess_type(image_path)
     if not mime_type or not mime_type.startswith("image"):
         raise ValueError("The file type is not recognized as an image")
 
     with Image.open(image_path) as img:
+        original_size = img.size
         if image_longest_side_in_px and (
             max(img.size) > image_longest_side_in_px or upscale_small_images
         ):
@@ -127,17 +132,33 @@ def image_to_base64(
             new_size = tuple([int(x * scale) for x in img.size])
             img = img.resize(new_size, Image.Resampling.LANCZOS)
 
-        buffer = io.BytesIO()
-        img_format = "JPEG" if mime_type == "image/jpeg" else "PNG"
-        img.save(buffer, format=img_format)
-        encoded_string = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        if save_scaled_image != "none":
+            buffer = io.BytesIO()
+            img_format = "JPEG" if mime_type == "image/jpeg" else "PNG"
+            img.save(buffer, format=img_format)
+            encoded_string = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+            if save_scaled_image == "overwrite" and new_size != original_size:
+                img.save(image_path, format=img_format)
+            elif save_scaled_image == "new_file" and new_size != original_size:
+                new_image_path = (
+                    os.path.splitext(image_path)[0]
+                    + "_scaled"
+                    + os.path.splitext(image_path)[1]
+                )
+                img.save(new_image_path, format=img_format)
 
     image_base64 = f"data:{mime_type};base64,{encoded_string}"
     return image_base64
 
 
 def process_images(
-    folder, image_longest_side_in_px, upscale_small_images=True, rpm=30, max_retries=5
+    folder,
+    image_longest_side_in_px,
+    upscale_small_images=True,
+    rpm=30,
+    max_retries=5,
+    save_scaled_image="none",
 ):
     image_files = [
         f
@@ -150,7 +171,7 @@ def process_images(
     for filename in image_files:
         file_path = os.path.join(folder, filename)
         image_base64 = image_to_base64(
-            file_path, image_longest_side_in_px, upscale_small_images
+            file_path, image_longest_side_in_px, upscale_small_images, save_scaled_image
         )
         description = send_image_to_openai_api(image_base64, rpm)
         description = format_description(description)
@@ -173,5 +194,6 @@ if __name__ == "__main__":
         upscale_small_images=upscale_small_images,
         rpm=request_per_minute,
         max_retries=max_request_retries,
+        save_scaled_image=save_scaled_image,
     )
     print(f"Session ended. Token usage summary: {token_usage_summary}")
