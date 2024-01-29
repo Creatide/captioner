@@ -21,6 +21,7 @@ image_folder = "images"
 image_longest_side_in_px = 2000  # Max length for the longer side of the image
 save_scaled_image = "overwrite"  # Options: 'overwrite', 'new_file', 'none'
 upscale_small_images = True  # Upscale images smaller than the longest side
+max_tokens_per_request = 300  # Max tokens per request
 request_per_minute = 20  # Requests per minute
 max_request_retries = 5  # Maximum number of retries for failed requests
 
@@ -70,7 +71,7 @@ def send_image_to_openai_api(image_base64, rpm=30, max_retries=5):
                     ],
                 }
             ],
-            "max_tokens": 300,
+            "max_tokens": max_tokens_per_request,
         }
         try:
             response = requests.post(
