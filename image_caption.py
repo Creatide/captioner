@@ -11,12 +11,8 @@ import requests
 from dotenv import load_dotenv
 from PIL import Image
 
-load_dotenv()
-
-# Set OpenAI API key
-openai_api_key = os.environ.get("OPENAI_API_KEY")
-
 # Settings for processing images
+# Change these to your own preferences
 image_folder = "images"
 image_longest_side_in_px = 2000  # Max length for the longer side of the image
 save_scaled_image = "overwrite"  # Options: 'overwrite', 'new_file', 'none'
@@ -25,14 +21,17 @@ max_tokens_per_request = 300  # Max tokens per request
 request_per_minute = 20  # Requests per minute
 max_request_retries = 5  # Maximum number of retries for failed requests
 
-# Global token usage summary
-token_usage_summary = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
+# Set OpenAI API key in .env file
+load_dotenv()
+openai_api_key = os.environ.get("OPENAI_API_KEY")
 if not openai_api_key:
     print("No OpenAI API key provided. Please set the OPENAI_API_KEY in the .env file.")
     sys.exit(1)
 
 openai.api_key = openai_api_key
+
+# Global token usage summary
+token_usage_summary = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
 def send_image_to_openai_api(image_base64, rpm=30, max_retries=5):
