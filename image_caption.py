@@ -52,8 +52,8 @@ def send_image_to_openai_api(image_base64, rpm=30, max_retries=5):
             "Analyze all elements in the image, understanding both the overall composition and individual components. "
             "Describe elements using single words or brief phrases, avoiding long sentences, and separate them with commas. "
             "Include tags for poses, orientations, and background styles where relevant. "
-            "Refrain from using specific names of locations, brands, or individuals in your descriptions. Replace these with generic terms that broadly categorize the subject."
-            "Example: For an image with an in-vehicle infotainment system, use 'user interface, clean design, navigation, music player, in-vehicle infotainment, white style, button bar on bottom.'"
+            "Refrain from using specific names of locations, brands, or individuals in your descriptions. Replace these with generic terms that broadly categorize the subject. "
+            "Example: For an image with an in-vehicle infotainment system, use 'user interface, clean design, navigation, music player, in-vehicle infotainment, white style, button bar on bottom.' "
         )
         headers = {"Authorization": f"Bearer {openai_api_key}"}
         payload = {
