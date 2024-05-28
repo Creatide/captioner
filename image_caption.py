@@ -14,8 +14,8 @@ from PIL import Image
 # Settings for processing images
 # Change these to your own preferences
 image_folder = "images"
-image_longest_side_in_px = 2000  # Max length for the longer side of the image
-save_scaled_image = "overwrite"  # Options: 'overwrite', 'new_file', 'none'
+image_longest_side_in_px = 768  # Max length for the longer side of the image
+save_scaled_image = "none"  # Options: 'overwrite', 'new_file', 'none'
 upscale_small_images = True  # Upscale images smaller than the longest side
 max_tokens_per_request = 300  # Max tokens per request
 request_per_minute = 20  # Requests per minute
@@ -134,15 +134,15 @@ def image_to_base64(
             new_size = tuple([int(x * scale) for x in img.size])
             img = img.resize(new_size, Image.Resampling.LANCZOS)
 
-        if save_scaled_image != "none":
-            buffer = io.BytesIO()
-            img_format = "JPEG" if mime_type == "image/jpeg" else "PNG"
-            img.save(buffer, format=img_format)
-            encoded_string = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        buffer = io.BytesIO()
+        img_format = "JPEG" if mime_type == "image/jpeg" else "PNG"
+        img.save(buffer, format=img_format)
+        encoded_string = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-            if save_scaled_image == "overwrite" and new_size != original_size:
+        if save_scaled_image != "none" and new_size != original_size:
+            if save_scaled_image == "overwrite":
                 img.save(image_path, format=img_format)
-            elif save_scaled_image == "new_file" and new_size != original_size:
+            elif save_scaled_image == "new_file":
                 new_image_path = (
                     os.path.splitext(image_path)[0]
                     + "_scaled"
