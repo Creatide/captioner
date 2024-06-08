@@ -2,7 +2,6 @@ import base64
 import io
 import mimetypes
 import os
-import subprocess
 import sys
 import time
 
@@ -12,14 +11,14 @@ from dotenv import load_dotenv
 from PIL import Image
 
 # Settings for processing images
-# Change these to your own preferences
 image_folder = "images"
 image_longest_side_in_px = 768  # Max length for the longer side of the image
 save_scaled_image = "none"  # Options: 'overwrite', 'new_file', 'none'
 upscale_small_images = True  # Upscale images smaller than the longest side
-max_tokens_per_request = 300  # Max tokens per request
+max_tokens_per_request = 400  # Max tokens per request
 request_per_minute = 20  # Requests per minute
 max_request_retries = 5  # Maximum number of retries for failed requests
+overwrite_existing_text = False  # Whether to overwrite existing text files
 
 # Set OpenAI API key in .env file
 load_dotenv()
@@ -35,18 +34,15 @@ token_usage_summary = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens
 
 
 def send_image_to_openai_api(image_base64, rpm=30, max_retries=5):
-    # Calculate delay based on RPM
     delay = 60 / rpm
     retry_count = 0
-    exponential_backoff = delay
 
     while retry_count < max_retries:
         print(
-            f"Attempt {retry_count + 1}: Delay between requests: {exponential_backoff} seconds."
+            f"Attempt {retry_count + 1}: Delay between requests: {delay} seconds."
         )
-        time.sleep(exponential_backoff)
+        time.sleep(delay)
 
-        # Prompt for image caption
         instructions = (
             "Generate a concise, descriptive caption for the image, focusing on key elements and features. "
             "Analyze all elements in the image, understanding both the overall composition and individual components. "
@@ -63,17 +59,16 @@ def send_image_to_openai_api(image_base64, rpm=30, max_retries=5):
             "messages": [
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": instructions},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": image_base64, "detail": "low"},
-                        },
-                    ],
+                    "content": instructions,
+                },
+                {
+                    "role": "user",
+                    "content": image_base64,
                 }
             ],
             "max_tokens": max_tokens_per_request,
         }
+
         try:
             response = requests.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -99,18 +94,22 @@ def send_image_to_openai_api(image_base64, rpm=30, max_retries=5):
             print(f"HTTP error occurred: {e}")
             if e.response.status_code == 429:
                 retry_count += 1
-                exponential_backoff *= 2
+                delay *= 2
                 continue
             else:
                 description = "Error: Unable to process image."
                 return description
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            retry_count += 1
+            delay *= 2
+            continue
 
     print("Maximum retries reached. Exiting.")
-    sys.exit(1)
+    return "Error: Maximum retries reached."
 
 
 def format_description(description):
-    # Replace all periods with commas, convert to lowercase, and remove trailing comma or period
     formatted_description = description.replace(".", ",").lower().rstrip(",.")
     return formatted_description
 
@@ -161,6 +160,7 @@ def process_images(
     rpm=30,
     max_retries=5,
     save_scaled_image="none",
+    overwrite_existing_text=False,
 ):
     image_files = [
         f
@@ -172,21 +172,33 @@ def process_images(
 
     for filename in image_files:
         file_path = os.path.join(folder, filename)
-        image_base64 = image_to_base64(
-            file_path, image_longest_side_in_px, upscale_small_images, save_scaled_image
-        )
-        description = send_image_to_openai_api(image_base64, rpm)
-        description = format_description(description)
         base_filename = os.path.splitext(filename)[0]
-        with open(os.path.join(folder, f"{base_filename}.txt"), "w") as txt_file:
-            txt_file.write(description)
+        text_file_path = os.path.join(folder, f"{base_filename}.txt")
 
-        images_processed += 1
-        remaining_images = total_images - images_processed
-        estimated_remaining_time = (remaining_images * 60) / rpm
-        print(
-            f"Processed {images_processed}/{total_images}. Estimated remaining time: {estimated_remaining_time:.2f} seconds."
-        )
+        if not overwrite_existing_text and os.path.exists(text_file_path):
+            print(f"Skipping {filename} as text file already exists.")
+            images_processed += 1
+            continue
+
+        try:
+            image_base64 = image_to_base64(
+                file_path, image_longest_side_in_px, upscale_small_images, save_scaled_image
+            )
+            description = send_image_to_openai_api(image_base64, rpm)
+            description = format_description(description)
+            
+            with open(text_file_path, "w") as txt_file:
+                txt_file.write(description)
+
+            images_processed += 1
+            remaining_images = total_images - images_processed
+            estimated_remaining_time = (remaining_images * 60) / rpm
+            print(
+                f"Processed {images_processed}/{total_images}. Estimated remaining time: {estimated_remaining_time:.2f} seconds."
+            )
+        except Exception as e:
+            print(f"Failed to process image {filename}: {e}")
+            continue
 
 
 if __name__ == "__main__":
@@ -197,5 +209,6 @@ if __name__ == "__main__":
         rpm=request_per_minute,
         max_retries=max_request_retries,
         save_scaled_image=save_scaled_image,
+        overwrite_existing_text=overwrite_existing_text,
     )
     print(f"Session ended. Token usage summary: {token_usage_summary}")
